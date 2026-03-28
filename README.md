@@ -1,73 +1,422 @@
-# 基于RouterOS的OSPF功能实现的流量分流科学上网功能
-## 致谢
-感谢@povsister项目提供的思路和项目代码。方案的原理和请求流程可以仔细阅读大佬写的说明
+# ForgeDNS Bypass
 
-本仓库的区别在于将OSPF路由添加部分从V2ray中抽离，并将其结合到Mosdns中。这样可以使用AdGurdHome + Mosdns灵活的控制dns的解析、缓存和去广告，另外代理的方案自由选择不需要再依赖于V2ray，本方案中使用的为sing-box作为透明代理服务器。
+基于 **ForgeDNS + MikroTik RouterOS** 的域名策略分流方案。
 
-项目地址：https://github.com/povsister/v2ray-core
-## 基本原理（ChatGPT生成）
-### 工作原理
-#### 1. 动态路由更新
-在MOSDNS服务器解析出IP后，会根据域名的规则判断是否将该IP添加到OSPF的路由表中。
-如果需要，MOSDNS会动态更新OSPF路由表，将对应的路由条目添加或删除，从而决定流量如何通过特定的网关进行转发。
-#### 2. 流量的分流与路由
-经过DNS解析后的IP地址会在OSPF路由表中作为路由条目存在。
-根据IP路由条目，流量会被导向不同的网关，实现了基于域名的流量分流。
-### 关键技术点
-#### 1. OSPF协议
-OSPF（开放最短路径优先）是一个动态路由协议，能够根据网络的变化自动更新路由表。
-在此系统中，OSPF用于根据不同的域名解析结果，自动调整路由路径。
-#### 2. MOSDNS服务器
-MOSDNS是一个支持规则配置的DNS服务器，能够根据不同的域名返回不同的IP地址。
-DNS解析的结果不仅影响客户端的访问路径，还能动态影响路由表的更新。
-#### 3. 网关选择与流量转发
-根据OSPF路由表的更新，流量被定向到不同的网关。
-不同的网关可以根据网络需求进行负载均衡、带宽限制、故障转移等管理。
-### 示例场景
-#### 正常访问流量：
-客户端请求 `www.baidu.com`，MOSDNS服务器返回国内ip不添加路由，正常上网
+本仓库用于演示如何使用 **ForgeDNS** 将特定域名的解析结果动态写入 RouterOS 的 `address-list`，再结合 RouterOS 的 `mangle + connection-mark + routing-mark + routing table` 实现基于域名的策略路由分流。
 
-#### 特定域名流量：
-客户端请求 `www.google.com`，MOSDNS服务器解析后国外IP。此时，OSPF路由表被更新，流量通过网关B转发。
+ForgeDNS 负责：**域名匹配、DNS 解析、提取 A/AAAA、同步到 RouterOS address-list**。RouterOS 负责：**连接打标、路由打标、按路由表选择出口**。
 
-#### 负载均衡与容错：
-如果网关B出现故障，OSPF中对应路由会删除，从而保证整体网络的可用性。
+这套方案适合家庭网络、旁路由、多出口、透明代理等场景，尤其适合希望“按域名决定出口，但又不想手工维护大量 IP”的使用方式。
 
-#### 总结
-通过将MOSDNS服务器与RouterOS的OSPF功能结合，可以实现基于域名的流量分流。该方案能够灵活地根据不同的域名选择不同的网关，确保不同类型的流量经过合适的路径，并为网络提供更高的可控性和可靠性。
-## 我的网络拓扑
-![alt text](img/网络拓扑.png)
-## 配置
-### RouterOS
-#### OSPF设置
-可结合致谢链接中的相关配置进行设置
- 1. `Routing -> Tables` 创建新的代理用的路由表，后续需要代理的ip才会走这个路由表，新增路由后需要参考main表在`IP -> Routes`中的配置，为新建的路由表创建路由规则，不然无法上网
+---
 
-![(img/image.png)](img/image.png)
+## 特性
 
-![alt text](img/image5.png)
+- 基于域名的精细化策略路由
+- ForgeDNS 驱动 RouterOS `address-list` 动态维护
+- 支持 IPv4 / IPv6 分离维护策略集合
+- 与透明代理网关配合实现分流
+- 保留 RouterOS 原生连接跟踪与策略路由能力
+- 熔断策略，家庭网络可用性大幅提升
+- 由于缺少旁路由的全家流量接管，正常流量无限接近无旁路由模式
+- 适合家庭网络、旁路由、多出口、透明代理等场景
 
- 2. `Routing -> OSPF -> Instances` 创建OSPF Instance
+---
 
-![alt text](img/image2.png)
+## 工作原理
 
- 3. `Routing -> OSPF -> Areas` 创建OSPF Area
+整体流程如下：
 
-![alt text](img/image3.png)
+1. 客户端向 ForgeDNS 发起 DNS 查询
+2. ForgeDNS 判断该域名是否命中策略域名集合
+3. 若命中，则正常解析域名
+4. ForgeDNS 从响应中提取 `A / AAAA`
+5. ForgeDNS 将解析结果写入 RouterOS 的 `address-list`
+6. 客户端随后向目标 IP 发起连接
+7. RouterOS 在 `prerouting` 阶段检查目标 IP 是否命中 `address-list`
+8. 命中后给该连接写入 `connection-mark`
+9. 再根据 `connection-mark` 写入 `routing-mark`
+10. 由指定路由表把流量送到代理出口
 
- 4. `Routing -> OSPF -> Interface Templates` 创建OSPF Interface Template
+---
 
-![alt text](img/image6.png)
+## 请求流程图
 
-#### 路由策略避免网络回环参考致谢链接中的配置方法
-#### 局域网部分ip不走分流
-`Routing -> Rules`中新增路由规则，如下图配置了两个规则为`172.16.1.64/26`、`172.16.1.128/26`，意思为IP第4位在64-128、128-192的局域网设备走proxy-table这个表中的路由，不在这个范围内的设备不会被代理
+```mermaid
+flowchart TD
+    A[客户端发起 DNS 查询] --> B[ForgeDNS 接收查询]
+    B --> C{是否命中策略域名集合}
+    C -- 否 --> D[正常解析并返回结果]
+    C -- 是 --> E[转发到上游解析]
+    E --> F[获取 A / AAAA 结果]
+    F --> G[写入 RouterOS address-list]
+    G --> H[返回 DNS 响应给客户端]
+    H --> I[客户端向目标 IP 发起连接]
+    I --> J[RouterOS prerouting 检查dst-address-list]
+    J --> K{是否命中策略集合}
+    K -- 否 --> L[走 main 表]
+    K -- 是 --> M[mark connection]
+    M --> N[mark routing]
+    N --> O[进入 policy_table]
+    O --> P[转发到透明代理 / 指定出口]
+```
 
-![alt text](img/image4.png)
-#### 探活设置自行目前还没完善，后续更新
-### Mosdns、Sing-box配置
-参考仓库对应目录的设置
+---
 
-其中使用的mosdns仓库: https://github.com/SvenShi/mosdns
+## RouterOS 连接决策流程
 
-sing-box服务器中使用的ospf-neighbor:https://github.com/SvenShi/ospf-neighbor
+```mermaid
+flowchart TD
+    A[收到客户端新连接] --> B{是否已有 connection-mark}
+    B -- 是 --> C[直接沿用既有 routing-mark]
+    B -- 否 --> D[查询目标 IP 是否在 policy_set]
+    D -- 否 --> E[走 main 表]
+    D -- 是 --> F[写入 connection-mark = policy_conn]
+    F --> G[派生 routing-mark = policy_table]
+    G --> H[按 policy_table 转发]
+```
+
+---
+
+## 网络拓扑
+
+下面的拓扑根据仓库原有网络拓扑图重绘，保留了原有网段和主机位置，并替换为当前的 ForgeDNS 分流方案。
+
+![forgedns_bypass_topology](img/forgedns_bypass_topology.jpg)
+
+---
+
+## 前置条件
+
+在开始前，请确认：
+
+1. 已经部署可正常运行的 **ForgeDNS** 
+2. 客户端 DNS 已经指向 ForgeDNS
+3. RouterOS 已开启 API，并允许 ForgeDNS 所在主机访问
+4. 已准备好透明代理出口，例如 ShellCrash，并开启透明代理网关
+5. 已规划好一个专用于策略流量的路由表，例如 `policy_table`
+
+---
+
+# 一、RouterOS 配置
+
+## 1. 创建策略路由表
+
+进入：
+
+```text
+Routing -> Tables
+```
+
+创建一个新的路由表并打开 `FIB`，例如：
+
+- `policy_table`
+
+这个表专门承载命中策略后的流量。
+
+![创建路由表](img/create_policy_table.png)
+
+---
+
+## 2. 为 `policy_table` 添加路由
+
+进入：
+
+```text
+IP -> Routes
+```
+
+为 `policy_table` 增加对应的默认路由或所需静态路由。
+
+常见方式：
+
+- 将 `0.0.0.0/0` 指向透明代理网关
+- 或者让 `policy_table` 通过某一旁路由 / 代理机转发
+- 参考 `main` 路由表配置补充局域网的回程路由
+
+例如：
+
+- `Dst. Address`: `0.0.0.0/0`
+- `Routing Table`: `policy_table`
+- `Gateway`: `172.16.2.40`
+- `Distance`: `2`
+
+![网关以及回程路由](img/route-table-gateway.png)
+
+---
+
+## 3. 规划 RouterOS address-list 名称
+
+ForgeDNS 会把解析结果写入 RouterOS 的地址集合中。本文只以 IPv4 演示：
+
+- `policy_set_v4`
+
+通常不需要手工创建，但后续 ForgeDNS 和 mangle 规则都要使用相同名称。
+
+进入：
+
+```text
+IP -> Firewall -> Address Lists
+```
+
+![Address Lists](img/address-lists.png)
+
+---
+
+## 4. 可选：添加 RouterOS 局域网设置限制 address-list
+
+如果不配置这个 `address-list`，所有经过 RouterOS 的流量都会按策略模式处理。这个列表的作用是只让指定来源网段进入策略模式。
+
+- `policy_set_src`
+
+
+进入：
+
+```text
+IP -> Firewall -> Address Lists
+```
+
+`172.16.1.64/26` 和 `172.16.1.128/26` 表示来源 IP 落在 `172.16.1.64` 到 `172.16.1.191` 区间内的主机会匹配该列表。
+
+![来源 IP 段配置](img/source-address-list.png)
+
+---
+
+## 5. 配置 mangle：首包命中策略集合时打连接标记
+
+进入：
+
+```text
+IP -> Firewall -> Mangle
+```
+
+### 规则一：根据 `dst-address-list` 写入 `connection-mark`
+
+示例思路：
+
+- `Chain`: `prerouting`
+- `Dst. Address List`: `policy_set_v4`
+- `Action`: `mark connection`
+- `New Connection Mark`: `policy_conn`
+
+IPv6 时可按同样思路单独做一套。
+
+### 规则二：根据 `connection-mark` 写入 `routing-mark`
+
+示例思路：
+
+- `Chain`: `prerouting`
+- `Connection Mark`: `policy_conn`
+- `Action`: `mark routing`
+- `New Routing Mark`: `policy_table`
+
+这样，命中策略地址集合的连接会进入 `policy_table`。
+
+#### `mark connection` 勾选 `passthrough`
+
+![mark connection 规则 1](img/mark-connection-1.png)
+![mark connection 规则 2](img/mark-connection-2.png)
+
+#### `mark routing` 取消勾选 `passthrough`
+
+![mark routing 规则 1](img/mark-routing-1.png)
+![mark routing 规则 2](img/mark-routing-2.png)
+
+#### `output` 链中的 `mark routing` 同样取消勾选 `passthrough`
+
+![output mark routing 规则 1](img/output-mark-routing-1.png)
+
+![output mark routing 规则 2](img/output-mark-routing-2.png)
+---
+
+## 6. 配置 DNS 转发
+
+将所有发往 RouterOS 的 DNS 请求转发到 ForgeDNS。
+
+进入：
+
+```text
+IP -> Firewall -> NAT
+```
+
+![DNS 转发规则 1](img/dns-forward-1.png)
+![DNS 转发规则 2](img/dns-forward-2.png)
+
+## 7. Netwatch 配置网络熔断回滚无策略模式
+
+当 DNS 服务器或策略网关不可用时，回滚到无策略模式。
+
+```text
+Tools -> Netwatch
+```
+
+### DNS 服务器回滚
+
+需要 DNS 服务器监听 `53` 端口。
+
+![DNS 回滚](img/dns-rollback.png)
+
+#### Up选项卡填写
+
+```
+# DNS 服务器可用时自动恢复 DNS 转发
+/log info "Side-Router health probe OK - Turn ON DNS Forward";
+/ip firewall nat enable [/ip firewall nat find where comment="DnsForward"];
+/ip dns set allow-remote-requests=no;
+```
+
+#### Down选项卡填写
+```
+# DNS 服务器不可用时停止 DNS 转发
+/log info "Side-Router health probe FAILED - Turn OFF DNS Forward";
+/ip firewall nat disable [/ip firewall nat find where comment="DnsForward"];
+/ip dns set allow-remote-requests=yes;
+```
+
+### 策略网关回滚
+
+![策略网关回滚](img/gateway-rollback.png)
+
+#### Up选项卡填写
+
+```
+# 策略网关可用时自动恢复策略打标
+/log info "Side-Proxy health probe OK - Turn ON policy mangle";
+/ip firewall mangle enable [/ip firewall mangle find where comment="mark_proxy_conn"];
+```
+
+#### Down选项卡填写
+```
+# 策略网关不可用时关闭策略打标
+/log info "Side-Proxy health probe FAILED - Turn OFF policy mangle";
+/ip firewall mangle disable [/ip firewall mangle find where comment="mark_proxy_conn"];
+```
+---
+
+# 二、ForgeDNS 配置
+
+参考仓库配置示例：`forgedns/config.yaml`
+
+ForgeDNS 文档：https://forgedns.cn
+
+ForgeDNS 仓库：https://github.com/SvenShi/forgedns
+
+---
+# 三、验证方法
+
+## 1. 验证 DNS 是否经过 ForgeDNS
+
+在客户端执行：
+
+```bash
+nslookup google.com 172.16.2.53
+```
+
+或：
+
+```bash
+dig @172.16.2.53 google.com
+```
+
+确认能得到正常解析结果。
+
+---
+
+## 2. 验证 RouterOS address-list 是否出现动态条目
+
+进入：
+
+```text
+IP -> Firewall -> Address Lists
+```
+
+检查：
+
+- `policy_set_v4`
+- `policy_set_v6`
+
+中是否出现 ForgeDNS 同步的解析结果。
+
+![address-list 动态写入结果](img/address-list-write.png)
+
+---
+
+## 3. 验证 mangle 是否命中
+
+进入：
+
+```text
+IP -> Firewall -> Connections
+```
+
+观察：
+
+- `Connection Mark` 是否存在标记
+
+![已打标连接](img/marked-connection.png)
+
+---
+
+## 4. 验证流量是否走了代理出口
+
+```text
+IP -> Firewall -> Mangle
+```
+
+检查以下任意一项：
+
+- `policy_table` 的流量情况
+- ShellCrash 侧连接日志
+
+---
+
+# 四、常见问题
+
+## 1. address-list 没有被写入
+
+优先检查：
+
+- 客户端是否真的在使用 ForgeDNS
+- 域名是否命中了 `domain_set`
+- ForgeDNS 到 RouterOS API 是否可达
+- `address_list4/address_list6` 命名是否一致
+- `sequence` 执行顺序是否正确
+
+---
+
+## 2. address-list 有数据，但流量没有走代理
+
+优先检查：
+
+- mangle 规则是否命中
+- `connection-mark` 是否成功写入
+- `routing-mark` 是否成功派生
+- `policy_table` 中是否存在有效路由
+- 透明代理网关是否可达
+
+---
+
+## 3. 命中策略后首个连接偶尔不稳定
+
+这通常和 DNS 返回到 RouterOS `address-list` 写入之间存在极短时间窗口有关。
+
+如果你对首包命中非常敏感，可以考虑：
+
+- 提高 RouterOS API 通路稳定性
+- 不要把 `min_ttl` 设得过低
+- 对关键目标使用 `persistent`
+- 在必要时评估是否关闭异步写入
+
+---
+
+# 参考资料
+
+- ForgeDNS 文档: https://forgedns.cn/
+- ForgeDNS 仓库：https://github.com/SvenShi/forgedns
+- ForgeDNS MikroTik 策略路由: https://forgedns.cn/mikrotik-policy-routing/
+
+---
+
+# License
+
+MIT
