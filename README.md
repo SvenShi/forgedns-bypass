@@ -295,7 +295,7 @@ Tools -> Netwatch
 
 # 二、ForgeDNS 配置
 
-参考仓库配置示例：`forgedns/config.yaml`
+参考仓库配置示例：[forgedns/config.yaml](forgedns/config.yaml)
 
 ForgeDNS 文档：https://forgedns.cn
 
