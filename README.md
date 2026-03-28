@@ -49,9 +49,8 @@ flowchart TD
     C --> D[获取 A / AAAA 结果]
     D --> E{是否命中策略集合}
     E -- 否 --> F[正常解析并返回结果]
-    E -- 是 --> G[正常解析并返回结果]
-    G --> H[写入 RouterOS address-list]
-    H --> I[返回 DNS 响应给客户端]
+    E -- 是 --> G[写入 RouterOS address-list]
+    G --> I[返回 DNS 响应给客户端]
     I --> J[客户端向目标 IP 发起连接]
     J --> K[RouterOS prerouting 检查dst-address-list]
     K --> L{是否命中策略集合}
