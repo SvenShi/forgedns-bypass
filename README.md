@@ -25,18 +25,18 @@ ForgeDNS 负责：**域名匹配、DNS 解析、提取 A/AAAA、同步到 Router
 
 ## 工作原理
 
-整体流程如下：
+这套方案分成两个阶段：先由 ForgeDNS 在 DNS 阶段维护目标 IP 集合，再由 RouterOS 在转发阶段按目标 IP 执行策略路由。
 
-1. 客户端向 ForgeDNS 发起 DNS 查询
-2. ForgeDNS 判断该域名是否命中策略域名集合
-3. 若命中，则正常解析域名
-4. ForgeDNS 从响应中提取 `A / AAAA`
-5. ForgeDNS 将解析结果写入 RouterOS 的 `address-list`
-6. 客户端随后向目标 IP 发起连接
-7. RouterOS 在 `prerouting` 阶段检查目标 IP 是否命中 `address-list`
-8. 命中后给该连接写入 `connection-mark`
-9. 再根据 `connection-mark` 写入 `routing-mark`
-10. 由指定路由表把流量送到代理出口
+1. 客户端先向 ForgeDNS 发起 DNS 查询
+2. ForgeDNS 将查询转发到上游 DNS，并获取响应中的 `A / AAAA` 结果
+3. ForgeDNS 判断当前域名是否命中预设策略集合
+4. 若未命中，仅将解析结果正常返回给客户端，不写入 RouterOS
+5. 若命中，则把解析出的目标 IP 动态写入 RouterOS 的 `address-list`
+6. 客户端拿到解析结果后，继续向目标 IP 发起实际连接
+7. RouterOS 在 `prerouting` 阶段检查该连接的目标地址是否命中对应的 `dst-address-list`
+8. 未命中则直接走主路由表 `main`
+9. 命中则先写入 `connection-mark`，再派生 `routing-mark`
+10. 最终由指定的策略路由表将这部分流量转发到透明代理或其他指定出口
 
 ---
 
