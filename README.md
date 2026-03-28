@@ -45,20 +45,21 @@ ForgeDNS 负责：**域名匹配、DNS 解析、提取 A/AAAA、同步到 Router
 ```mermaid
 flowchart TD
     A[客户端发起 DNS 查询] --> B[ForgeDNS 接收查询]
-    B --> C{是否命中策略域名集合}
-    C -- 否 --> D[正常解析并返回结果]
-    C -- 是 --> E[转发到上游解析]
-    E --> F[获取 A / AAAA 结果]
-    F --> G[写入 RouterOS address-list]
-    G --> H[返回 DNS 响应给客户端]
-    H --> I[客户端向目标 IP 发起连接]
-    I --> J[RouterOS prerouting 检查dst-address-list]
-    J --> K{是否命中策略集合}
-    K -- 否 --> L[走 main 表]
-    K -- 是 --> M[mark connection]
-    M --> N[mark routing]
-    N --> O[进入 policy_table]
-    O --> P[转发到透明代理 / 指定出口]
+    B --> C[转发到上游解析]
+    C --> D[获取 A / AAAA 结果]
+    D --> E{是否命中策略集合}
+    E -- 否 --> F[正常解析并返回结果]
+    E -- 是 --> G[正常解析并返回结果]
+    G --> H[写入 RouterOS address-list]
+    H --> I[返回 DNS 响应给客户端]
+    I --> J[客户端向目标 IP 发起连接]
+    J --> K[RouterOS prerouting 检查dst-address-list]
+    K --> L{是否命中策略集合}
+    L -- 否 --> M[走 main 表]
+    L -- 是 --> O[mark connection]
+    O --> P[mark routing]
+    P --> Q[进入 policy_table]
+    Q --> X[转发到透明代理 / 指定出口]
 ```
 
 ---
