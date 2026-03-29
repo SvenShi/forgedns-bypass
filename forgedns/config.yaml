@@ -73,8 +73,8 @@ plugins:
     
 
  # 动态路由 添加解析后的ip到
-  - tag: mikrotik 
-    type: mikrotik
+  - tag: ros_address_list 
+    type: ros_address_list
     args:
       address: 172.16.1.1:8728
       username: api_user
@@ -90,7 +90,7 @@ plugins:
   - tag: remote_sequence
     type: sequence
     args:
-      - exec: $mikrotik
+      - exec: $ros_address_list
       - exec: $cache
       - exec: $forward_remote
 
