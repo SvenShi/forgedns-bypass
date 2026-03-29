@@ -412,7 +412,7 @@ IP -> Firewall -> Mangle
 # 参考资料
 
 - ForgeDNS 文档: https://forgedns.cn/
-- ForgeDNS 仓库：https://github.com/SvenShi/forgedns
+- ForgeDNS 仓库: https://github.com/SvenShi/forgedns
 - ForgeDNS MikroTik 策略路由: https://forgedns.cn/mikrotik-policy-routing/
 
 ---
