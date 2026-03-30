@@ -81,7 +81,7 @@ plugins:
       password: secret
       address_list4: proxy_dst
       comment_prefix: fdns
-      min_ttl: 600
+      fixed_ttl: 86400
       persistent:
         files:
           - "/opt/forgedns/dat/geoip_telegram.txt"
