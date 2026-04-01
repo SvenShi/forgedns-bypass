@@ -1,8 +1,9 @@
-# ForgeDNS Bypass
-
 本方案对比Fake-IP分流方案还是有劣势，建议了解一下Fake-IP方案同样可以结合RouterOS使用。
 
 仓库地址：https://github.com/yyysuo/mosdns
+
+
+# ForgeDNS Bypass
 
 基于 **ForgeDNS + MikroTik RouterOS** 的域名策略分流方案。
 
